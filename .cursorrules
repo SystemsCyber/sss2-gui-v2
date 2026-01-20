@@ -1,0 +1,131 @@
+# SSS2 Project Guardrails (Cursor Rules)
+
+## Project structure (MANDATORY)
+- Repo has two top-level folders:
+  - app-ui/  (FastAPI backend + serves built UI)
+  - ui/      (Svelte frontend; build outputs served by FastAPI)
+- Do NOT create additional top-level apps or frameworks outside these folders.
+
+## Platform + footprint constraints (Raspberry Pi)
+- Optimize for small runtime footprint and fast startup.
+- Production deployment MUST NOT require Node.js installed on the Raspberry Pi.
+  - Node is allowed ONLY for local/dev builds inside ui/.
+  - Production uses pre-built static assets copied into app-ui/static/ui/.
+- Avoid heavy dependencies (frontend and backend). Prefer stdlib + small libs.
+
+## Frontend requirements (Svelte latest)
+- Use Svelte (latest) + Vite for dev/build.
+- Use runes for this application 
+- Build output must be static assets (no SSR runtime requirement).
+- UI must be touch-friendly:
+  - sliders for ranged values
+  - large toggle buttons
+  - high-contrast, big hit targets (>=44px)
+- Keep UI state minimal and predictable (use Svelte stores only where needed).
+
+## CSS library choice
+- Use Tailwind CSS (preferred) because production CSS can be tree-shaken and small.
+- Tailwind must compile at build-time only; ship only the final CSS.
+- Do NOT add big UI kits unless explicitly requested.
+
+## Backend requirements (FastAPI + asyncio)
+- FastAPI must use asyncio where applicable:
+  - serial I/O handled in a background task
+  - CAN scanning/listening is background task(s)
+- API must be structured:
+  - routers/ route layer
+  - services/ business logic layer
+  - middleware/ orchestrator object that routes commands to services and schedules tasks on the event loop
+  - store/ persistence layer for peripheral definitions + device state + snapshots
+- The backend serves:
+  - API under /api
+  - UI static files at /
+- Keep serial port configurable:
+  - default on Mac: /dev/tty.usbmodem40768801
+  - allow override by env var SSS2_SERIAL_PORT
+
+## Data store requirements
+- store/ must contain:
+  1) peripheral_catalog file describing ALL POs, CAN, J1708, PWM, VOUTs (human-readable + machine-parseable)
+  2) current_device_state file representing current settings/status
+  3) snapshots/ directory of saved “configs” with date/time labels (revertable)
+
+## Testing
+- Backend: pytest tests for core services + API routes (at least smoke tests).
+- Frontend: minimal tests (optional), but must at least build successfully.
+
+## Non-goals / avoid
+- No database server dependencies.
+- No Docker requirement for production (optional for dev only).
+- No huge JS frameworks or component libraries.
+
+## SSS2 Physical Port Model (IMPORTANT CONTEXT)
+
+The SSS2 hardware exposes TWO physical connector ports:
+
+- J18
+- J24
+
+Each port contains multiple numbered pins.
+Pins are addressed using the format:
+
+  "<PORT>:<PIN_NUMBER>"
+  Example: "J24:1", "J18:7"
+
+### Potentiometers (POs)
+- Potentiometers are physically wired to pins on either J18 or J24.
+- Each potentiometer has:
+  - Terminal A
+  - Terminal B
+  - Wiper
+- The UI allows enabling/disabling (connecting) each terminal logically.
+- Wiper position is a numeric value constrained by:
+  - ECM Fault Low Setting
+  - ECM Fault High Setting
+
+### Interpretation Rules
+- "Pin" indicates the physical connector and pin number (e.g. J24:1).
+- "Port" is a logical grouping/index used by SSS2 firmware (NOT a physical USB/COM port).
+- Pins on J18/J24 are fixed by hardware and must NOT be edited.
+- Wiring options (Wire Color) depend on the selected port and available cabling options for that port.
+
+### UI Expectations
+- When configuring a potentiometer:
+  - The user selects/configures only editable fields.
+  - Fixed hardware fields are read-only.
+  - Sliders are used for Wiper Position.
+  - Toggles are used for Terminal A/B/Wiper connections.
+
+  "UX": {
+  "Application": "Application Description",
+  "ECM Fault High Setting": 255,
+  "ECM Fault Low Setting": 0,
+  "Name": "Potentiometer 1",
+  "Pin": "J24:1",
+  "Port": "1",
+  "Resistance": "10k",
+  "Term. A Connect": true,
+  "Term. B Connect": true,
+  "Wiper Connect": true,
+  "Wiper Position": 159,
+  "Wire Color": "PPL/WHT"
+}
+where x in the UX is digit between 1 to 30
+
+Category
+Fields
+Identity (fixed)
+Name, Pin, Port, Resistance
+Electrical constraints (fixed)
+ECM Fault High Setting, ECM Fault Low Setting
+Configuration (editable)
+Application, terminal connects, Wiper Position, Wire Color
+
+
+  "Editable": {
+  "TermA": true,
+  "TermB": true,
+  "Wiper": true,
+  "WiperPosition": true,
+  "WireColor": true
+}

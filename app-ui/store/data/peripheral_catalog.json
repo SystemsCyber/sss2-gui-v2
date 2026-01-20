@@ -1,0 +1,168 @@
+{
+  "potentiometers": [
+    {
+      "id": "po1",
+      "name": "Potentiometer 1",
+      "port": 1,
+      "pin": "J24:1",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po2",
+      "name": "Potentiometer 2",
+      "port": 2,
+      "pin": "J24:2",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po3",
+      "name": "Potentiometer 3",
+      "port": 3,
+      "pin": "J24:3",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po4",
+      "name": "Potentiometer 4",
+      "port": 4,
+      "pin": "J24:4",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po5",
+      "name": "Potentiometer 5",
+      "port": 5,
+      "pin": "J24:5",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po6",
+      "name": "Potentiometer 6",
+      "port": 6,
+      "pin": "J24:6",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po7",
+      "name": "Potentiometer 7",
+      "port": 7,
+      "pin": "J24:7",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po8",
+      "name": "Potentiometer 8",
+      "port": 8,
+      "pin": "J24:8",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po9",
+      "name": "Potentiometer 9",
+      "port": 9,
+      "pin": "J24:9",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po10",
+      "name": "Potentiometer 10",
+      "port": 10,
+      "pin": "J24:10",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po11",
+      "name": "Potentiometer 11",
+      "port": 11,
+      "pin": "J24:11",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po12",
+      "name": "Potentiometer 12",
+      "port": 12,
+      "pin": "J24:12",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po13",
+      "name": "Potentiometer 13",
+      "port": 13,
+      "pin": "J18:11",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po14",
+      "name": "Potentiometer 14",
+      "port": 14,
+      "pin": "J18:12",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po15",
+      "name": "Potentiometer 15",
+      "port": 15,
+      "pin": "J24:15",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    },
+    {
+      "id": "po16",
+      "name": "Potentiometer 16",
+      "port": 16,
+      "pin": "J24:16",
+      "resistance": "10k",
+      "ecm_fault_low": 0,
+      "ecm_fault_high": 255,
+      "type": "potentiometer"
+    }
+  ],
+  "vouts": [],
+  "pwms": [],
+  "can_channels": [],
+  "j1708": []
+}
