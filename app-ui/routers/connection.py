@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from pydantic import BaseModel
 
 from middleware.orchestrator import Orchestrator
 
@@ -11,14 +12,37 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/connection", tags=["connection"])
 
-# Set of active WebSocket connections
-_active_connections: Set[WebSocket] = set()
+
+class ConnectionStatusResponse(BaseModel):
+    connected: bool
+    port: str
+    message: str | None
 
 
 def get_orchestrator() -> Orchestrator:
     """Dependency to get orchestrator."""
     from main import get_orchestrator_instance
     return get_orchestrator_instance()
+
+
+# Set of active WebSocket connections
+_active_connections: Set[WebSocket] = set()
+
+
+@router.get("/status", response_model=ConnectionStatusResponse)
+async def get_connection_status(orchestrator: Orchestrator = Depends(get_orchestrator)):
+    """Get current connection status via REST API."""
+    is_connected = orchestrator.is_connected()
+    port = orchestrator.serial_service.port if orchestrator.serial_service else "unknown"
+    message = "Connected" if is_connected else "Disconnected"
+    
+    logger.info(f"REST API connection status check: connected={is_connected}, port={port}")
+    
+    return ConnectionStatusResponse(
+        connected=is_connected,
+        port=port,
+        message=message
+    )
 
 
 def broadcast_connection_status(connected: bool, port: str, message: str | None) -> None:
@@ -64,18 +88,9 @@ async def websocket_endpoint(websocket: WebSocket):
     on_connection_changed = None
     
     try:
-        # Send initial connection status
-        is_connected = orchestrator.is_connected()
-        port = orchestrator.serial_service.port if orchestrator.serial_service else "unknown"
-        
-        await websocket.send_json({
-            "type": "connection_status",
-            "connected": is_connected,
-            "port": port,
-            "message": "Connected" if is_connected else "Disconnected"
-        })
-        
-        # Register callback for connection status changes
+        # Register callback for connection status changes FIRST
+        # This ensures we don't miss connection status updates that happen
+        # between WebSocket connection and callback registration
         def on_connection_changed(connected: bool, port: str, message: str | None) -> None:
             """Callback for connection status changes."""
             try:
@@ -89,6 +104,32 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.debug(f"Failed to send connection status update: {e}")
         
         orchestrator.register_connection_callback(on_connection_changed)
+        
+        # Send initial connection status
+        is_connected = orchestrator.is_connected()
+        port = orchestrator.serial_service.port if orchestrator.serial_service else "unknown"
+        
+        await websocket.send_json({
+            "type": "connection_status",
+            "connected": is_connected,
+            "port": port,
+            "message": "Connected" if is_connected else "Disconnected"
+        })
+        
+        # Re-check connection status after a short delay to catch any
+        # connection that might have happened during WebSocket setup
+        await asyncio.sleep(0.5)
+        current_connected = orchestrator.is_connected()
+        current_port = orchestrator.serial_service.port if orchestrator.serial_service else "unknown"
+        
+        # Only send update if status changed
+        if current_connected != is_connected or current_port != port:
+            await websocket.send_json({
+                "type": "connection_status",
+                "connected": current_connected,
+                "port": current_port,
+                "message": "Connected" if current_connected else "Disconnected"
+            })
         
         # Keep connection alive and handle client messages
         while True:

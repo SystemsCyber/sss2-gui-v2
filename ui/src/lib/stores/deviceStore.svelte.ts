@@ -1,5 +1,5 @@
 /** Svelte 5 runes-based device state management. */
-import { apiClient, type DeviceState, type Catalog, type Snapshot } from '$lib/api/client';
+import { apiClient, type DeviceState, type Catalog, type Snapshot, type ECUFull } from '$lib/api/client';
 
 export interface ConnectionStatus {
   connected: boolean;
@@ -20,6 +20,8 @@ class DeviceStore {
     port: null,
     message: null
   });
+  selectedECUId = $state<string | null>(null);
+  selectedECU = $state<ECUFull | null>(null);
 
   // ✅ Derived state using $derived rune
   ignitionState = $derived(this.deviceState?.ignition ?? false);
@@ -50,7 +52,18 @@ export async function updateState(updates: Partial<DeviceState>): Promise<void> 
   store.isLoading = true;
   store.error = null;
   try {
-    const state = await apiClient.updateState(updates);
+    // Filter out deprecated fields from potentiometer updates
+    const filteredUpdates = { ...updates };
+    if (filteredUpdates.potentiometers) {
+      const cleanedPotentiometers: Record<string, any> = {};
+      for (const [key, value] of Object.entries(filteredUpdates.potentiometers)) {
+        const { application, wire_color, term_a_connect, term_b_connect, wiper_connect, ...rest } = value as any;
+        cleanedPotentiometers[key] = rest;
+      }
+      filteredUpdates.potentiometers = cleanedPotentiometers;
+    }
+    
+    const state = await apiClient.updateState(filteredUpdates);
     store.deviceState = state;
   } catch (e) {
     store.error = e instanceof Error ? e.message : 'Failed to update state';
@@ -133,5 +146,49 @@ export async function deleteSnapshot(snapshotId: string): Promise<void> {
     throw e;
   } finally {
     store.isLoading = false;
+  }
+}
+
+export async function setSelectedECU(ecuId: string | null): Promise<void> {
+  if (ecuId === null) {
+    store.selectedECUId = null;
+    store.selectedECU = null;
+    // Clear from localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('selectedECUId');
+    }
+    return;
+  }
+  
+  store.isLoading = true;
+  store.error = null;
+  try {
+    const ecu = await apiClient.getECU(ecuId);
+    store.selectedECUId = ecuId;
+    store.selectedECU = ecu;
+    // Save to localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('selectedECUId', ecuId);
+    }
+  } catch (e) {
+    store.error = e instanceof Error ? e.message : 'Failed to load ECU';
+    console.error('Failed to load ECU:', e);
+  } finally {
+    store.isLoading = false;
+  }
+}
+
+export function loadSelectedECUFromStorage(): void {
+  if (typeof window !== 'undefined') {
+    const storedECUId = localStorage.getItem('selectedECUId');
+    if (storedECUId) {
+      setSelectedECU(storedECUId);
+    }
+  }
+}
+
+export async function reloadSelectedECU(): Promise<void> {
+  if (store.selectedECUId) {
+    await setSelectedECU(store.selectedECUId);
   }
 }

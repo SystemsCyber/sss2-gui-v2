@@ -1,5 +1,7 @@
 /** WebSocket client for connection status updates. */
 
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+
 export interface ConnectionStatusMessage {
   type: 'connection_status';
   connected: boolean;
@@ -17,13 +19,31 @@ class WebSocketClient {
   private url: string;
 
   constructor(url: string = '/api/connection/ws') {
-    this.url = url.startsWith('ws') ? url : 
-      `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}${url}`;
+    // Determine if we're in development mode
+    const isDev = import.meta.env.DEV;
+    
+    if (url.startsWith('ws://') || url.startsWith('wss://')) {
+      // Already a full WebSocket URL
+      this.url = url;
+    } else if (API_BASE.startsWith('http://') || API_BASE.startsWith('https://')) {
+      // API_BASE is absolute (e.g., http://localhost:8000)
+      // Convert to WebSocket protocol
+      const wsProtocol = API_BASE.startsWith('https://') ? 'wss:' : 'ws:';
+      const baseUrl = API_BASE.replace(/^https?:/, wsProtocol).replace(/\/$/, '');
+      this.url = `${baseUrl}${url.startsWith('/') ? url : '/' + url}`;
+    } else if (isDev) {
+      // In development, connect directly to backend (bypass proxy issues)
+      // Vite proxy can be unreliable for WebSockets
+      this.url = `ws://localhost:8000${url}`;
+    } else {
+      // Production: use current origin
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.url = `${protocol}//${window.location.host}${url}`;
+    }
   }
 
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      console.log('WebSocket already connected');
       return;
     }
 
@@ -40,7 +60,6 @@ class WebSocketClient {
     if (!this.ws) return;
 
     this.ws.onopen = () => {
-      console.log('WebSocket connected');
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
@@ -51,10 +70,11 @@ class WebSocketClient {
       try {
         const message: ConnectionStatusMessage = JSON.parse(event.data);
         if (message.type === 'connection_status') {
+          // Only log if status actually changed (reduce noise)
           this.notifyCallbacks(message);
         }
       } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
+        console.error('Failed to parse WebSocket message:', error, event.data);
       }
     };
 
@@ -63,7 +83,6 @@ class WebSocketClient {
     };
 
     this.ws.onclose = () => {
-      console.log('WebSocket disconnected');
       this.ws = null;
       this.scheduleReconnect();
     };
@@ -74,7 +93,6 @@ class WebSocketClient {
 
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
-      console.log('Attempting to reconnect WebSocket...');
       this.connect();
     }, this.reconnectInterval);
   }

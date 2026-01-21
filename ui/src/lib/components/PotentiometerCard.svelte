@@ -1,30 +1,78 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { PotentiometerDefinition, PotentiometerState } from '$lib/api/client';
   import { deviceStore, updateState } from '$lib/stores/deviceStore.svelte';
 
   // ✅ Using $props() rune for component props (Svelte 5)
-  let { potDef }: { potDef: PotentiometerDefinition } = $props();
+  let { potDef, powerVoltage = '5V' }: { potDef: PotentiometerDefinition; powerVoltage?: '5V' | '12V' } = $props();
   
   let expanded = $state(false);
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let localWiperPosition = $state<number | null>(null);
   
   // ✅ Using $derived rune for reactive state
   const potState = $derived(deviceStore.deviceState?.potentiometers?.[potDef.id] as PotentiometerState | undefined);
+  
+  // Use local state for slider if available, otherwise use potState
+  const displayWiperPosition = $derived(localWiperPosition ?? potState?.wiper_position ?? 0);
+  
+  // Get ECU pin configuration for this potentiometer's pin
+  const ecuPinConfig = $derived(
+    deviceStore.selectedECU?.pins?.[potDef.pin] || null
+  );
 
-  async function updatePot(updates: Partial<PotentiometerState>) {
+  async function updatePot(updates: Partial<PotentiometerState>, debounce: boolean = false) {
     if (!potState) return;
     
-    try {
-      await updateState({
-        potentiometers: {
-          [potDef.id]: {
-            ...potState,
-            ...updates
+    // Filter out application, wire_color, and old terminal fields from updates
+    const { application, wire_color, term_a_connect, term_b_connect, wiper_connect, ...filteredUpdates } = updates as any;
+    
+    // If debouncing, clear previous timer and set new one
+    if (debounce) {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      
+      debounceTimer = setTimeout(async () => {
+        try {
+          await updateState({
+            potentiometers: {
+              [potDef.id]: {
+                ...potState,
+                ...filteredUpdates
+              }
+            }
+          });
+          // Clear local state after successful update
+          localWiperPosition = null;
+        } catch (error) {
+          // Silently handle timeout errors during slider movement
+          // State is saved, hardware command is sent in background
+          if (error instanceof Error && error.message.includes('timeout')) {
+            console.log(`Potentiometer ${potDef.id} command queued (may timeout, but state saved)`);
+          } else {
+            console.error('Failed to update potentiometer:', error);
+            // Only show alert for non-timeout errors
+            alert('Failed to update potentiometer. Please try again.');
           }
         }
-      });
-    } catch (error) {
-      console.error('Failed to update potentiometer:', error);
-      alert('Failed to update potentiometer. Please try again.');
+        debounceTimer = null;
+      }, 300); // Wait 300ms after user stops moving slider
+    } else {
+      // Immediate update (for non-slider controls like checkboxes)
+      try {
+        await updateState({
+          potentiometers: {
+            [potDef.id]: {
+              ...potState,
+              ...filteredUpdates
+            }
+          }
+        });
+      } catch (error) {
+        console.error('Failed to update potentiometer:', error);
+        alert('Failed to update potentiometer. Please try again.');
+      }
     }
   }
 
@@ -32,8 +80,18 @@
     expanded = !expanded;
   }
 
-  // ✅ Calculate voltage from wiper position (0-255 maps to 0.0V-5.0V) using $derived
-  const voltage = $derived(potState ? (potState.wiper_position / 255) * 5.0 : 0);
+  // ✅ Get voltage from state if available, otherwise calculate from wiper position
+  // Voltage range depends on power setting: 0-5V or 0-12V
+  const maxVoltage = $derived(powerVoltage === '12V' ? 12.0 : 5.0);
+  const voltage = $derived(potState ? (potState.voltage ?? (potState.wiper_position / 255) * maxVoltage) : 0);
+  const isEnabled = $derived(potState?.enabled ?? false);
+  
+  // Cleanup debounce timer on destroy
+  onDestroy(() => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+  });
 </script>
 
 <div class="bg-dark-card rounded-lg border border-dark-accent/20 overflow-hidden">
@@ -43,8 +101,17 @@
     onclick={toggleExpanded}
   >
     <div class="flex items-center gap-4">
-      <div class="bg-dark-accent text-dark-bg rounded px-3 py-1 font-bold">
-        U{potDef.port}
+      <div class="flex items-center gap-2">
+        <!-- Status Indicator Circle -->
+        <div
+          class="w-4 h-4 rounded-full transition-colors"
+          class:bg-green-500={isEnabled}
+          class:bg-red-500={!isEnabled}
+          title={isEnabled ? 'Potentiometer is ON' : 'Potentiometer is OFF'}
+        ></div>
+        <div class="bg-dark-accent text-dark-bg rounded px-3 py-1 font-bold">
+          U{potDef.port}
+        </div>
       </div>
       <div class="text-left">
         <div class="font-semibold">{potDef.name}</div>
@@ -86,82 +153,60 @@
       <!-- Wiper Position Slider -->
       <div>
         <label for="wiper-position-{potDef.id}" class="block text-sm text-gray-400 mb-2">
-          Wiper Position: {potState.wiper_position} ({voltage.toFixed(2)}V)
+          Wiper Position: {displayWiperPosition} ({((displayWiperPosition / 255) * maxVoltage).toFixed(2)}V)
         </label>
         <input
           id="wiper-position-{potDef.id}"
           type="range"
           min="0"
           max="255"
-          value={potState.wiper_position}
-          oninput={(e) => updatePot({ wiper_position: parseInt(e.currentTarget.value) })}
+          value={displayWiperPosition}
+          oninput={(e) => {
+            const wiperPosition = parseInt(e.currentTarget.value);
+            const calculatedVoltage = (wiperPosition / 255) * maxVoltage;
+            // Update local state immediately for UI responsiveness
+            localWiperPosition = wiperPosition;
+            // Debounce the actual API call to avoid timeout errors from rapid updates
+            updatePot({ wiper_position: wiperPosition, voltage: calculatedVoltage }, true);
+          }}
           class="w-full h-2 bg-dark-surface rounded-lg appearance-none cursor-pointer accent-dark-accent"
           style="min-height: 44px;"
         />
         <div class="flex justify-between text-xs text-gray-400 mt-1">
           <span>0.0V</span>
-          <span>5.0V</span>
+          <span>{maxVoltage.toFixed(1)}V</span>
         </div>
       </div>
 
-      <!-- Terminal Connections -->
+      <!-- On/Off Toggle -->
       <div>
-        <div class="block text-sm text-gray-400 mb-2">Terminals</div>
-        <div class="flex gap-6">
-          <label class="flex items-center gap-2 cursor-pointer min-h-touch">
-            <input
-              type="checkbox"
-              checked={potState.term_a_connect}
-              onchange={(e) => updatePot({ term_a_connect: e.currentTarget.checked })}
-              class="w-6 h-6 accent-dark-accent"
-            />
-            <span>Term A</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer min-h-touch">
-            <input
-              type="checkbox"
-              checked={potState.wiper_connect}
-              onchange={(e) => updatePot({ wiper_connect: e.currentTarget.checked })}
-              class="w-6 h-6 accent-dark-accent"
-            />
-            <span>Wiper</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer min-h-touch">
-            <input
-              type="checkbox"
-              checked={potState.term_b_connect}
-              onchange={(e) => updatePot({ term_b_connect: e.currentTarget.checked })}
-              class="w-6 h-6 accent-dark-accent"
-            />
-            <span>Term B</span>
-          </label>
+        <div class="block text-sm text-gray-400 mb-2">Potentiometer State</div>
+        <button
+          class="w-full px-6 py-4 rounded font-semibold transition-colors min-h-touch"
+          class:bg-green-600={isEnabled}
+          class:hover:bg-green-700={isEnabled}
+          class:bg-red-600={!isEnabled}
+          class:hover:bg-red-700={!isEnabled}
+          onclick={() => updatePot({ enabled: !isEnabled })}
+        >
+          {isEnabled ? 'On' : 'Off'}
+        </button>
+      </div>
+
+      <!-- ECU Function (Read-only from selected ECU) -->
+      <div>
+        <div class="text-sm text-gray-400 mb-1">ECU Function Description</div>
+        <div class="px-4 py-2 rounded bg-dark-surface border border-dark-accent/20 text-gray-300 min-h-touch">
+          {ecuPinConfig?.ecu_function || 'Not configured'}
         </div>
       </div>
 
-      <!-- Application -->
+      <!-- Wire Color (Read-only from selected ECU) -->
       <div>
-        <label for="application-{potDef.id}" class="block text-sm text-gray-400 mb-2">ECU Application Description</label>
-        <input
-          id="application-{potDef.id}"
-          type="text"
-          value={potState.application}
-          oninput={(e) => updatePot({ application: e.currentTarget.value })}
-          placeholder="Application description"
-          class="w-full px-4 py-2 rounded bg-dark-surface border border-dark-accent/20 focus:border-dark-accent focus:outline-none min-h-touch"
-        />
-      </div>
-
-      <!-- Wire Color -->
-      <div>
-        <label for="wire-color-{potDef.id}" class="block text-sm text-gray-400 mb-2">Wire Color</label>
-        <input
-          id="wire-color-{potDef.id}"
-          type="text"
-          value={potState.wire_color}
-          oninput={(e) => updatePot({ wire_color: e.currentTarget.value })}
-          placeholder="e.g. PPL/WHT"
-          class="w-full px-4 py-2 rounded bg-dark-surface border border-dark-accent/20 focus:border-dark-accent focus:outline-none min-h-touch"
-        />
+        <div class="text-sm text-gray-400 mb-1">Wire Color</div>
+        <div class="px-4 py-2 rounded bg-dark-surface border border-dark-accent/20 text-gray-300 min-h-touch">
+          {ecuPinConfig?.wire_color || 'Not specified'}
+        </div>
       </div>
     </div>
   {/if}

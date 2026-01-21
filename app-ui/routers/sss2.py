@@ -63,7 +63,14 @@ async def update_state(
     try:
         updated_state = state_service.update_state(update.state)
         # Apply changes to hardware via orchestrator
-        await orchestrator.apply_state_changes(update.state)
+        # Run in background task to avoid blocking on timeouts
+        try:
+            # Create background task for hardware updates
+            import asyncio
+            asyncio.create_task(orchestrator.apply_state_changes(update.state))
+        except Exception as e:
+            # Log but don't fail the request - state is already saved
+            logger.warning(f"Hardware command failed (state saved): {e}")
         return updated_state
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

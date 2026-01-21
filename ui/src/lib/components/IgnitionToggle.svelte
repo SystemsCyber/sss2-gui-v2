@@ -5,9 +5,10 @@
   let isToggling = $state(false);
 
   const currentIgnition = $derived(deviceStore.ignitionState);
-  const displayText = $derived(isToggling ? '...' : (currentIgnition ? 'Start' : 'OFF'));
-  const isOnClass = $derived(currentIgnition && !isToggling);
-  const isOffClass = $derived(!currentIgnition && !isToggling);
+  const displayText = $derived(isToggling ? '...' : (currentIgnition ? 'Stop' : 'Start'));
+  // Swap colors: green for "Start" (off state), red for "Stop" (on state)
+  const isOnClass = $derived(!currentIgnition && !isToggling); // Green styling for "Start"
+  const isOffClass = $derived(currentIgnition && !isToggling); // Red/maroon styling for "Stop"
 
   async function toggle(event: MouseEvent) {
     event.preventDefault();

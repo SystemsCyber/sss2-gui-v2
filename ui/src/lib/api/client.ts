@@ -33,6 +33,7 @@ export interface DeviceState {
   connected_port: string | null;
   ignition: boolean;
   potentiometers: Record<string, PotentiometerState>;
+  potentiometer_power_groups?: Record<string, PotentiometerPowerGroup>;
   vouts: Record<string, any>;
   pwms: Record<string, any>;
   can: Record<string, any>;
@@ -41,11 +42,17 @@ export interface DeviceState {
 
 export interface PotentiometerState {
   wiper_position: number;
-  term_a_connect: boolean;
-  term_b_connect: boolean;
-  wiper_connect: boolean;
-  application: string;
-  wire_color: string;
+  voltage: number;  // Calculated based on power setting (0-5V or 0-12V)
+  enabled: boolean;  // On/Off state (default: false)
+  // Removed: term_a_connect, term_b_connect, wiper_connect
+  application?: string;  // Deprecated - now from ECU
+  wire_color?: string;  // Deprecated - now from ECU
+}
+
+export interface PotentiometerPowerGroup {
+  group_id: string;  // e.g., "1-2", "3-4"
+  voltage_setting: '5V' | '12V';  // Selected voltage
+  potentiometers: string[];  // Pot IDs in this group, e.g., ["po1", "po2"]
 }
 
 export interface Snapshot {
@@ -64,6 +71,47 @@ export interface IgnitionResponse {
   detail: string;
   confirmation: string | null;
   ignition: boolean;
+}
+
+export interface PinConfiguration {
+  wire_color: string;
+  ecu_function: string;
+}
+
+export interface ECUItem {
+  id: string;
+  name: string;
+  model: string;
+  serial_number: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ECUFull {
+  id: string;
+  name: string;
+  model: string;
+  serial_number: string;
+  pictures: string[];
+  pins: Record<string, PinConfiguration>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ECUCreate {
+  name: string;
+  model?: string;
+  serial_number?: string;
+  pictures?: string[];
+  pins?: Record<string, PinConfiguration>;
+}
+
+export interface ECUUpdate {
+  name?: string;
+  model?: string;
+  serial_number?: string;
+  pictures?: string[];
+  pins?: Record<string, PinConfiguration>;
 }
 
 class ApiClient {
@@ -139,6 +187,34 @@ class ApiClient {
 
   async deleteSnapshot(snapshotId: string): Promise<void> {
     await this.request(`/snapshots/${snapshotId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async listECUs(): Promise<ECUItem[]> {
+    return this.request<ECUItem[]>('/ecu');
+  }
+
+  async getECU(ecuId: string): Promise<ECUFull> {
+    return this.request<ECUFull>(`/ecu/${ecuId}`);
+  }
+
+  async createECU(ecu: ECUCreate): Promise<ECUFull> {
+    return this.request<ECUFull>('/ecu', {
+      method: 'POST',
+      body: JSON.stringify(ecu),
+    });
+  }
+
+  async updateECU(ecuId: string, updates: ECUUpdate): Promise<ECUFull> {
+    return this.request<ECUFull>(`/ecu/${ecuId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteECU(ecuId: string): Promise<void> {
+    await this.request(`/ecu/${ecuId}`, {
       method: 'DELETE',
     });
   }

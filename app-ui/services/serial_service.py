@@ -150,76 +150,115 @@ class SerialService:
                 # Check if device exists
                 port_path = Path(self.port)
                 if not port_path.exists():
-                    logger.warning(f"Serial port {self.port} does not exist")
-                    self.connected = False
-                    if self._on_connection_changed:
-                        self._on_connection_changed(False, self.port, "Device not found")
+                    if self.connected:
+                        logger.warning(f"Serial port {self.port} does not exist")
+                        self.connected = False
+                        if self._on_connection_changed:
+                            self._on_connection_changed(False, self.port, "Device not found")
                     await asyncio.sleep(self._heartbeat_interval)
                     continue
                 
-                # Try to connect
-                logger.info(f"Connecting to {self.port} at {self.baudrate} baud...")
-                try:
-                    self._reader, self._writer = await serial_asyncio.open_serial_connection(
-                        url=self.port,
-                        baudrate=self.baudrate
-                    )
+                # Skip if already connected and tasks are running
+                if self.connected and self._reader and self._writer and self._read_task and not self._read_task.done():
+                    await asyncio.sleep(1.0)  # Check connection status periodically
+                    continue
+                
+                # Try to connect (only if not already connected)
+                if not self.connected:
+                    logger.info(f"Connecting to {self.port} at {self.baudrate} baud...")
+                    try:
+                        self._reader, self._writer = await serial_asyncio.open_serial_connection(
+                            url=self.port,
+                            baudrate=self.baudrate
+                        )
+                        
+                        self.connected = True
+                        logger.info(f"Connected to {self.port}")
+                        
+                        if self._on_connection_changed:
+                            self._on_connection_changed(True, self.port, "Connected")
+                        
+                        # Start read and write tasks
+                        if self._read_task is None or self._read_task.done():
+                            self._read_task = asyncio.create_task(self._read_loop())
+                        
+                        if self._write_task is None or self._write_task.done():
+                            self._write_task = asyncio.create_task(self._write_loop())
+                        
+                        # Start heartbeat task
+                        if self._heartbeat_task is None or self._heartbeat_task.done():
+                            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
                     
-                    self.connected = True
-                    logger.info(f"Connected to {self.port}")
-                    
-                    if self._on_connection_changed:
-                        self._on_connection_changed(True, self.port, "Connected")
-                    
-                    # Start read and write tasks
-                    if self._read_task is None:
-                        self._read_task = asyncio.create_task(self._read_loop())
-                    
-                    if self._write_task is None:
-                        self._write_task = asyncio.create_task(self._write_loop())
-                    
-                    # Start heartbeat task
-                    if self._heartbeat_task is None:
-                        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-                    
-                    # Wait for connection to fail (read/write tasks will handle errors)
-                    await asyncio.gather(
+                    except serial_asyncio.serial.SerialException as e:
+                        logger.error(f"Serial connection error: {e}")
+                        self.connected = False
+                        if self._on_connection_changed:
+                            self._on_connection_changed(False, self.port, str(e))
+                        
+                        # Clean up failed connection
+                        if self._writer:
+                            try:
+                                self._writer.close()
+                                await self._writer.wait_closed()
+                            except Exception:
+                                pass
+                            self._writer = None
+                        self._reader = None
+                        
+                        # Cancel tasks
+                        for task in [self._read_task, self._write_task, self._heartbeat_task]:
+                            if task:
+                                task.cancel()
+                                try:
+                                    await task
+                                except asyncio.CancelledError:
+                                    pass
+                        
+                        self._read_task = None
+                        self._write_task = None
+                        self._heartbeat_task = None
+                        
+                        await asyncio.sleep(5)  # Retry after 5 seconds
+                        continue
+                
+                # Wait for connection to fail (read/write tasks will handle errors)
+                # Only wait if tasks are running and not done
+                if (self._read_task and not self._read_task.done() and
+                    self._write_task and not self._write_task.done() and
+                    self._heartbeat_task and not self._heartbeat_task.done()):
+                    results = await asyncio.gather(
                         self._read_task,
                         self._write_task,
                         self._heartbeat_task,
                         return_exceptions=True
                     )
                     
-                except serial_asyncio.serial.SerialException as e:
-                    logger.error(f"Serial connection error: {e}")
-                    self.connected = False
-                    if self._on_connection_changed:
-                        self._on_connection_changed(False, self.port, str(e))
-                    
-                    # Clean up failed connection
-                    if self._writer:
-                        try:
-                            self._writer.close()
-                            await self._writer.wait_closed()
-                        except Exception:
-                            pass
-                        self._writer = None
-                    self._reader = None
-                    
-                    # Cancel tasks
-                    for task in [self._read_task, self._write_task, self._heartbeat_task]:
-                        if task:
-                            task.cancel()
+                    # If any task failed, mark as disconnected and clean up
+                    if any(isinstance(r, Exception) for r in results if r is not None):
+                        logger.warning("Connection tasks failed, cleaning up...")
+                        self.connected = False
+                        if self._on_connection_changed:
+                            self._on_connection_changed(False, self.port, "Connection lost")
+                        
+                        # Clean up
+                        if self._writer:
                             try:
-                                await task
-                            except asyncio.CancelledError:
+                                self._writer.close()
+                                await self._writer.wait_closed()
+                            except Exception:
                                 pass
+                            self._writer = None
+                        self._reader = None
+                        
+                        self._read_task = None
+                        self._write_task = None
+                        self._heartbeat_task = None
+                        
+                        await asyncio.sleep(5)  # Retry after 5 seconds
+                else:
+                    # Tasks not running or done, wait a bit before checking again
+                    await asyncio.sleep(1.0)
                     
-                    self._read_task = None
-                    self._write_task = None
-                    self._heartbeat_task = None
-                    
-                    await asyncio.sleep(5)  # Retry after 5 seconds
                     
             except asyncio.CancelledError:
                 break
@@ -256,8 +295,22 @@ class SerialService:
                 continue
             except asyncio.CancelledError:
                 break
+            except serial_asyncio.serial.SerialException as e:
+                # Device disconnected - handle gracefully
+                error_msg = str(e)
+                if "Device not configured" in error_msg or "device not configured" in error_msg.lower():
+                    logger.info("Device disconnected")
+                    self.connected = False
+                    if self._on_connection_changed:
+                        self._on_connection_changed(False, self.port, "Device disconnected")
+                else:
+                    logger.warning(f"Serial write error: {error_msg}")
+                    self.connected = False
+                    if self._on_connection_changed:
+                        self._on_connection_changed(False, self.port, f"Write error: {error_msg}")
+                break
             except Exception as e:
-                logger.error(f"Write error: {e}", exc_info=True)
+                logger.warning(f"Write error: {e}")
                 # Mark connection as failed
                 self.connected = False
                 if self._on_connection_changed:
@@ -298,11 +351,39 @@ class SerialService:
                 except asyncio.TimeoutError:
                     # Timeout is OK, continue reading
                     continue
+                except serial_asyncio.serial.SerialException as e:
+                    # Device disconnected during read - handle gracefully
+                    error_msg = str(e)
+                    if "Device not configured" in error_msg or "device not configured" in error_msg.lower():
+                        logger.info("Device disconnected")
+                        self.connected = False
+                        if self._on_connection_changed:
+                            self._on_connection_changed(False, self.port, "Device disconnected")
+                    else:
+                        logger.warning(f"Serial read error: {error_msg}")
+                        self.connected = False
+                        if self._on_connection_changed:
+                            self._on_connection_changed(False, self.port, f"Read error: {error_msg}")
+                    break
                     
             except asyncio.CancelledError:
                 break
+            except serial_asyncio.serial.SerialException as e:
+                # Device disconnected - handle gracefully
+                error_msg = str(e)
+                if "Device not configured" in error_msg or "device not configured" in error_msg.lower():
+                    logger.info("Device disconnected")
+                    self.connected = False
+                    if self._on_connection_changed:
+                        self._on_connection_changed(False, self.port, "Device disconnected")
+                else:
+                    logger.warning(f"Serial read error: {error_msg}")
+                    self.connected = False
+                    if self._on_connection_changed:
+                        self._on_connection_changed(False, self.port, f"Read error: {error_msg}")
+                break
             except Exception as e:
-                logger.error(f"Read error: {e}", exc_info=True)
+                logger.warning(f"Read error: {e}")
                 # Mark connection as failed
                 self.connected = False
                 if self._on_connection_changed:
@@ -405,22 +486,96 @@ class SerialService:
         
         return await self.send_command("50,0")
     
-    async def set_pot(self, port: int, value: int) -> str:
-        """Set potentiometer wiper position and wait for confirmation.
+    async def set_pot(self, port: int, value: int, wait_for_response: bool = True) -> Optional[str]:
+        """Set potentiometer wiper position.
         
         Args:
             port: Potentiometer port (1-16)
             value: Wiper position (0-255)
+            wait_for_response: If True, wait for confirmation. If False, fire-and-forget.
             
         Returns:
-            Confirmation response from SSS2
+            Confirmation response from SSS2, or None if wait_for_response is False
             
         Raises:
             SerialConnectionError: If not connected
-            CommandTimeoutError: If no response received
+            CommandTimeoutError: If wait_for_response is True and no response received
         """
         if not self.connected:
             raise SerialConnectionError(f"Not connected to {self.port}")
         
         command = f"{port},{value}"
-        return await self.send_command(command)
+        
+        if wait_for_response:
+            return await self.send_command(command)
+        else:
+            # Fire-and-forget: just queue the command without waiting
+            if self._command_queue:
+                await self._command_queue.put((command, None))
+                logger.info(f"Sent potentiometer command (fire-and-forget): {command}")
+                return None
+            else:
+                raise SerialConnectionError("Command queue not initialized")
+    
+    async def set_pot_power(self, group_command: int, voltage: int, wait_for_response: bool = False) -> Optional[str]:
+        """Set potentiometer power group voltage setting.
+        
+        Args:
+            group_command: Power group command number (25-32)
+            voltage: 0 for +5V, 1 for +12V
+            wait_for_response: If True, wait for confirmation. If False, fire-and-forget.
+            
+        Returns:
+            Confirmation response from SSS2, or None if wait_for_response is False
+            
+        Raises:
+            SerialConnectionError: If not connected
+        """
+        if not self.connected:
+            raise SerialConnectionError(f"Not connected to {self.port}")
+        
+        command = f"{group_command},{voltage}"
+        
+        if wait_for_response:
+            return await self.send_command(command)
+        else:
+            # Fire-and-forget: just queue the command without waiting
+            if self._command_queue:
+                await self._command_queue.put((command, None))
+                logger.info(f"Sent potentiometer power command (fire-and-forget): {command}")
+                return None
+            else:
+                raise SerialConnectionError("Command queue not initialized")
+    
+    async def set_pot_enabled(self, port: int, enabled: bool, wait_for_response: bool = False) -> Optional[str]:
+        """Set potentiometer enabled/disabled state.
+        
+        Args:
+            port: Potentiometer port (1-16)
+            enabled: True to enable (on), False to disable (off)
+            wait_for_response: If True, wait for confirmation. If False, fire-and-forget.
+            
+        Returns:
+            Confirmation response from SSS2, or None if wait_for_response is False
+            
+        Raises:
+            SerialConnectionError: If not connected
+        """
+        if not self.connected:
+            raise SerialConnectionError(f"Not connected to {self.port}")
+        
+        # Calculate command port: 51 for pot 1, 52 for pot 2, etc.
+        command_port = 50 + port
+        value = 7 if enabled else 3  # 7 = on, 3 = off
+        command = f"{command_port},{value}"
+        
+        if wait_for_response:
+            return await self.send_command(command)
+        else:
+            # Fire-and-forget: just queue the command without waiting
+            if self._command_queue:
+                await self._command_queue.put((command, None))
+                logger.info(f"Sent potentiometer enable command (fire-and-forget): {command}")
+                return None
+            else:
+                raise SerialConnectionError("Command queue not initialized")

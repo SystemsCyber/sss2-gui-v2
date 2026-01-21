@@ -6,10 +6,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 from middleware.orchestrator import Orchestrator
-from routers import health, sss2, snapshots, catalog, connection
+from routers import health, sss2, snapshots, catalog, connection, ecu
 
 
 # Configure logging
@@ -72,6 +73,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add CORS middleware to allow requests from Vite dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Add request logging middleware
 @app.middleware("http")
 async def log_requests(request, call_next):
@@ -96,6 +106,7 @@ app.include_router(sss2.router, prefix="/api")
 app.include_router(snapshots.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
 app.include_router(connection.router, prefix="/api")
+app.include_router(ecu.router, prefix="/api")
 
 
 # ---------- Static File Serving ----------
