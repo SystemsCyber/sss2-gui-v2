@@ -405,4 +405,4 @@ This is a proprietary project. For questions or issues, contact the development 
 
 ## License
 
-Proprietary - All Rights Reserved
+MIT - All Rights Reserved
