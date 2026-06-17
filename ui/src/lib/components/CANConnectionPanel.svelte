@@ -48,13 +48,32 @@
     }
   }
 
-  onMount(async () => {
-    await fetchCANStatus();
+  async function refreshInterfaces() {
     try {
-      interfaces = await apiClient.listCANInterfaces();
-      if (interfaces.length > 0) selectedInterface = interfaces[0];
+      const list = await apiClient.listCANInterfaces();
+      interfaces = list;
+      // Keep current selection if it still exists; otherwise default to first
+      if (selectedInterface && !list.some(i => i.channel === selectedInterface!.channel && i.interface === selectedInterface!.interface)) {
+        selectedInterface = list.length > 0 ? list[0] : null;
+      } else if (!selectedInterface && list.length > 0) {
+        selectedInterface = list[0];
+      }
     } catch (e) {
       console.error('Failed to load CAN interfaces:', e);
+    }
+  }
+
+  onMount(async () => {
+    await fetchCANStatus();
+    await refreshInterfaces();
+  });
+
+  // Refresh the interface list whenever the panel returns to a state where
+  // the dropdown is visible — catches interfaces that have come/gone since mount.
+  $effect(() => {
+    const s = canStatus.state;
+    if (s === 'disconnected' || s === 'cannot_claim') {
+      refreshInterfaces();
     }
   });
 

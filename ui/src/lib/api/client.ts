@@ -42,7 +42,7 @@ export interface DeviceState {
 export interface PotentiometerState {
   wiper_position: number;
   voltage: number;
-  enabled: boolean;
+  tcon: number;  // 3-bit terminal connection: bit0=B(GND), bit1=Wiper, bit2=A(5V)
   application?: string;
   wire_color?: string;
 }

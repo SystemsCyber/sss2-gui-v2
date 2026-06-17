@@ -65,3 +65,6 @@ htmlcov/
 app-ui/store/data/current_device_state.json
 app-ui/store/data/snapshots/*.json
 !app-ui/store/data/snapshots/.gitkeep
+
+# Exclude the console-sss2
+console-sss2/
